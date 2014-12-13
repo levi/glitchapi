@@ -10,7 +10,7 @@ import (
 	"html"
 	"net/http"
 	"os"
-	"strconv"
+	"strings"
 	"time"
 )
 
@@ -37,7 +37,6 @@ func gamesHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		games := make([]map[string]interface{}, len(g))
-		fmt.Printf("Games handler: %d", len(g))
 		for k, v := range g {
 			games[k] = map[string]interface{}{
 				"name":           v.Name,
@@ -118,7 +117,9 @@ func addHTTPHeader(w *http.ResponseWriter, expiration *time.Time) {
 	h := (*w).Header()
 	h.Add("Content-Type", "application/json")
 	if expiration != nil {
-		h.Add("max-age", strconv.FormatInt(int64((*expiration).Sub(time.Now())/time.Second), 10))
-		h.Add("Expires", (*expiration).Format(time.RFC1123))
+		maxAge := int64((*expiration).Sub(time.Now()) / time.Second)
+		expires := (*expiration).Format(time.RFC1123)
+		h.Add("Cache-Control", fmt.Sprintf("public, max-age=%d", maxAge))
+		h.Add("Expires", strings.Replace(expires, "UTC", "GMT", 1))
 	}
 }
