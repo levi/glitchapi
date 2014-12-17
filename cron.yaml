@@ -1,0 +1,4 @@
+cron:
+- description: top games cache refresh
+  url: /tasks/fetch/games
+  schedule: every 5 minutes

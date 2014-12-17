@@ -2,8 +2,10 @@ package glitch
 
 import (
 	"appengine"
+	"appengine/memcache"
 	"appengine/urlfetch"
 	"cache"
+	"datastore"
 	"encoding/json"
 	"fmt"
 	"github.com/levi/twch"
@@ -21,30 +23,31 @@ var (
 func init() {
 	http.HandleFunc("/api/v1/games", gamesHandler)
 	http.HandleFunc("/api/v1/streams", streamsHandler)
+
+	http.HandleFunc("/tasks/fetch/games", fetchGamesHandler)
 }
 
 func gamesHandler(w http.ResponseWriter, r *http.Request) {
 	c := appengine.NewContext(r)
+	d := datastore.NewClient(&c)
+
 	result, err := cache.Fetch(c, "top_games", func() (b []byte, err error) {
-		twitch, err := twitchClient(c)
+		var games []datastore.Game
+		q := d.Games.Query().Order("-Viewers")
+		_, err = q.GetAll(c, &games)
 		if err != nil {
 			return nil, err
 		}
 
-		g, _, err := twitch.Games.ListTop(&twch.RequestOptions{ListOptions: twch.ListOptions{Limit: 50}})
-		if err != nil {
-			return nil, err
-		}
-
-		games := make([]map[string]interface{}, len(g))
-		for k, v := range g {
-			games[k] = map[string]interface{}{
+		g := make([]map[string]interface{}, len(games))
+		for k, v := range games {
+			g[k] = map[string]interface{}{
 				"name":           v.Name,
-				"boxTemplateURL": v.Box.Template,
+				"boxTemplateURL": v.BoxTemplateURL,
 			}
 		}
 
-		b, err = json.Marshal(games)
+		b, err = json.Marshal(g)
 		if err != nil {
 			return nil, err
 		}
@@ -106,6 +109,62 @@ func streamsHandler(w http.ResponseWriter, r *http.Request) {
 	addHTTPHeader(&w, nil)
 
 	fmt.Fprint(w, string(result.Value))
+}
+
+func fetchGamesHandler(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+	d := datastore.NewClient(&c)
+	_ = d
+	twitch, err := twitchClient(c)
+	_ = twitch
+	if err != nil {
+		c.Errorf("Fetch Games: Error creating twitch client - %s", err)
+		return
+	}
+
+	var updateTime time.Time
+	o := &twch.RequestOptions{ListOptions: twch.ListOptions{Limit: 100}}
+	for {
+		g, resp, err := twitch.Games.ListTop(o)
+		_ = g
+		if err != nil {
+			http.Error(w, `{ error: "Error fetching twitch games" }`, 503)
+			return
+		}
+
+		gc, errc := d.Games.StoreGames(g)
+		for ge := range gc {
+			updateTime = ge.Contents.UpdatedAt
+			c.Infof("Fetch Games: Stored game - %s | Viewers: %d | Channels: %d", ge.Contents.Name, ge.Contents.Viewers, ge.Contents.Channels)
+		}
+		if err := <-errc; err != nil {
+			http.Error(w, `{ error: "Fetch Games: Error storing game" }`, 503)
+			return
+		}
+
+		if resp.NextOffset != nil && *resp.NextOffset < *resp.Total {
+			c.Infof("Fetch Games: Fetched games %d of %d", *resp.NextOffset, *resp.Total)
+			o.Offset = *resp.NextOffset
+		} else {
+			c.Infof("Fetch Games: Completed")
+			break
+		}
+	}
+
+	gc, errc := d.Games.ResetIdle(updateTime)
+	for ge := range gc {
+		c.Infof("Fetch Games: Reset idle game - %s", ge.Contents.Name)
+	}
+	if err := <-errc; err != nil {
+		http.Error(w, `{ error: "Fetch Games: Error reseting idle games" }`, 503)
+		return
+	}
+
+	err = memcache.Delete(c, "top_games")
+	if err != nil {
+		http.Error(w, `{ error: "Fetch Games: Error deleting top_games cache" }`, 503)
+		return
+	}
 }
 
 func twitchClient(c appengine.Context) (t *twch.Client, err error) {
