@@ -33,7 +33,7 @@ func gamesHandler(w http.ResponseWriter, r *http.Request) {
 
 	result, err := cache.Fetch(c, "top_games", func() (b []byte, err error) {
 		var games []datastore.Game
-		q := d.Games.Query().Order("-Viewers")
+		q := d.Games.Query().Order("-Viewers").Limit(50)
 		_, err = q.GetAll(c, &games)
 		if err != nil {
 			return nil, err
