@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/levi/twch"
 	"html"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"strings"
@@ -21,10 +22,68 @@ var (
 )
 
 func init() {
+	http.HandleFunc("/api/v1/app_config", configHandler)
 	http.HandleFunc("/api/v1/games", gamesHandler)
 	http.HandleFunc("/api/v1/streams", streamsHandler)
 
 	http.HandleFunc("/tasks/fetch/games", fetchGamesHandler)
+}
+
+func configHandler(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+
+	h := w.Header()
+	h.Add("Content-Type", "application/json")
+
+	config, err := memcache.Get(c, "app_config")
+	if err != nil && err != memcache.ErrCacheMiss {
+		shortError := fmt.Sprintf("Error: %v", err)
+		http.Error(w, shortError, http.StatusServiceUnavailable)
+		return
+	}
+
+	if err == nil {
+		fmt.Fprint(w, string(config.Value))
+		return
+	}
+
+	dir := "./scripts"
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		shortError := fmt.Sprintf("Error: %v", err)
+		http.Error(w, shortError, http.StatusServiceUnavailable)
+		return
+	}
+
+	scripts := make(map[string]string)
+	for _, f := range files {
+		n := f.Name()
+		script, err := ioutil.ReadFile(fmt.Sprintf("%s/%s", dir, n))
+		if err != nil {
+			return
+		}
+		sn := strings.Replace(n, ".min.js", "", 1)
+		scripts[sn] = string(script)
+	}
+
+	b, err := json.Marshal(scripts)
+	if err != nil {
+		shortError := fmt.Sprintf("Error: %v", err)
+		http.Error(w, shortError, http.StatusServiceUnavailable)
+		return
+	}
+
+	config = &memcache.Item{
+		Key:   "app_config",
+		Value: b,
+	}
+	if err := memcache.Set(c, config); err != nil {
+		shortError := fmt.Sprintf("Error: %v", err)
+		http.Error(w, shortError, http.StatusServiceUnavailable)
+		return
+	}
+
+	fmt.Fprint(w, string(b))
 }
 
 func gamesHandler(w http.ResponseWriter, r *http.Request) {

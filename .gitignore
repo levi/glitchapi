@@ -1,2 +1,5 @@
 .envrc
 app.yaml
+node_modules
+gae_config.json
+scripts/

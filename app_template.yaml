@@ -1,4 +1,4 @@
-application: glitchapi
+application: <%= application %>
 version: 1
 runtime: go
 api_version: go1
@@ -8,8 +8,12 @@ handlers:
   script: _go_app
   login: admin
 
+- url: /scripts
+  static_dir: scripts
+  application_readable: true
+
 - url: /.*
   script: _go_app
 
 env_variables:
-  TWITCH_API_KEY: "API_KEY"
+  TWITCH_API_KEY: "<%= twitch_api_key %>"
