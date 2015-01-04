@@ -142,6 +142,9 @@ func fetchGamesHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// NOTE: Breaking after first fetch to reduce db writes for now
+		break
+
 		if resp.NextOffset != nil && *resp.NextOffset < *resp.Total {
 			c.Infof("Fetch Games: Fetched games %d of %d", *resp.NextOffset, *resp.Total)
 			o.Offset = *resp.NextOffset
@@ -160,11 +163,9 @@ func fetchGamesHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = memcache.Delete(c, "top_games")
-	if err != nil {
-		http.Error(w, `{ error: "Fetch Games: Error deleting top_games cache" }`, 503)
-		return
-	}
+	memcache.Delete(c, "top_games")
+
+	gamesHandler(w, r)
 }
 
 func twitchClient(c appengine.Context) (t *twch.Client, err error) {
